@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>GamesStake Crash Advanced</title>
+<style>
+body {margin:0;padding:0;font-family:Arial;background:#0a0f1c;color:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh;}
+.box {background:#12192b;padding:20px;border-radius:15px;box-shadow:0 0 30px #00ffae55;width:500px;text-align:center;position:relative;}
+input {width:90%;padding:10px;margin:5px 0;border-radius:5px;border:none;font-size:16px;}
+button {padding:10px 20px;margin:5px;border:none;border-radius:5px;background:#00ffae;color:#000;font-weight:bold;cursor:pointer;transition:0.2s;}
+button:hover {background:#00d090;}
+#loginBox,#mainDiv,#crashGameDiv,#storeDiv{display:none;}
+.history {background:#111;padding:10px;max-height:150px;overflow-y:auto;margin-top:10px;border-radius:5px;text-align:left;font-size:14px;}
+.multiplier {font-size:60px;font-weight:bold;margin:10px;color:#00ffae;text-shadow:0 0 10px #00ffae,0 0 20px #00ffae;}
+#plane{font-size:60px;position:absolute;top:20px;left:50%;transform:translateX(-50%);transition: top 0.05s linear;}
+#gameStatus {margin-top:10px;font-size:18px;color:#ff6600;text-align:center;font-weight:bold;}
+button:disabled {opacity:0.5;cursor:not-allowed;}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="loginBox" class="box">
+  <h2>  </h2>
+  <input id="loginUser" placeholder=" "><br>
+  <input id="loginPin" type="password" placeholder="PIN" maxlength="5"><br>
+  <div style="text-align:left;margin:5px 0;">
+    <input type="checkbox" id="rememberMe"> 
+  </div>
+  <button onclick="login()"></button>
+  <p id="loginMsg"></p>
+</div>
+
+<!-- Main -->
+<div id="mainDiv" class="box">
+  <h2>  <span id="profileUsername"></span></h2>
+  <p> : <span id="balanceDisplay">0</span>$</p>
+  <button onclick="openCrash()"> Crash Advanced</button>
+  <button onclick="showStore()"> </button>
+  <button onclick="logout()"> </button>
+</div>
+
+<!-- Crash Game -->
+<div id="crashGameDiv" class="box">
+  <h2> Crash Advanced</h2>
+  <p>: <span id="crashBalance">0</span>$</p>
+  <input id="betAmount" type="number" placeholder=""><br>
+  <button onclick="maxBet()">Max Bet</button><br>
+  <div id="plane"></div>
+  <div class="multiplier" id="multiplier">1.00x</div>
+  <p id="gameStatus"></p>
+  <button id="startBtn" onclick="startCrash()">Start Game</button>
+  <button id="cashoutBtn" onclick="cashout()" disabled>Cashout</button><br>
+  <button onclick="showMain()"> </button>
+</div>
+
+<!-- Store -->
+<div id="storeDiv" class="box">
+  <h2> </h2>
+  <h3></h3>
+  <input id="rechargeAmount" type="number" placeholder="  ">
+  <button onclick="rechargeCustom()"></button>
+  <p id="msgRecharge"></p>
+  <h3></h3>
+  <input id="withdrawAmount" type="number" placeholder=" ">
+  <button onclick="withdrawCustom()"></button>
+  <p id="msgWithdraw"></p>
+  <h3></h3>
+  <div id="history" class="history"></div>
+  <button onclick="showMain()"> </button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+// Firebase
+const firebaseConfig = {
+  apiKey:"AIzaSyAM7gLKuLRfhFdWyakFS1jU4c8xU1fg-FU",
+  authDomain:"family-bank-966ae.firebaseapp.com",
+  databaseURL:"https://family-bank-966ae-default-rtdb.firebaseio.com",
+  projectId:"family-bank-966ae"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let currentUser='', crashInterval, multiplier=1, crashPoint=0, isPlaying=false, bet=0;
+
+// Auto-login
+window.onload = function(){
+  const savedUser = localStorage.getItem("currentUser");
+  if(savedUser){
+    currentUser = savedUser;
+    showMain();
+    updateBalance();
+    loadHistory();
+  } else { document.getElementById('loginBox').style.display='block'; }
+};
+
+// Login
+function login(){
+  let u = document.getElementById('loginUser').value;
+  let p = document.getElementById('loginPin').value;
+  let remember = document.getElementById('rememberMe').checked;
+  db.ref("userStake/"+u).once("value").then(s=>{
+    if(!s.exists()){alert("  "); return;}
+    if(s.val().pin!==p){alert("PIN "); return;}
+    currentUser = u;
+    if(remember){localStorage.setItem("currentUser",u);} else{localStorage.removeItem("currentUser");}
+    showMain(); updateBalance(); loadHistory();
+  });
+}
+
+// UI
+function hideAll(){document.querySelectorAll('.box').forEach(d=>d.style.display='none');}
+function showMain(){hideAll(); document.getElementById('mainDiv').style.display='block'; document.getElementById('profileUsername').innerText=currentUser;}
+function openCrash(){hideAll();document.getElementById('crashGameDiv').style.display='block'; updateBalance(); resetCrash();}
+function showStore(){hideAll();document.getElementById('storeDiv').style.display='block';}
+function logout(){localStorage.removeItem('currentUser'); location.reload();}
+
+// Balance
+function updateBalance(){
+  db.ref("gamesstake/"+currentUser+"/balance").once("value").then(s=>{
+    let b=s.val()||0;
+    document.getElementById('balanceDisplay').innerText=b.toFixed(2);
+    document.getElementById('crashBalance').innerText=b.toFixed(2);
+  });
+}
+
+// Crash
+function resetCrash(){multiplier=1; document.getElementById("multiplier").innerText="1.00x"; document.getElementById("gameStatus").innerText=""; document.getElementById("cashoutBtn").disabled=true; isPlaying=false; document.getElementById("plane").style.top="20px";}
+function generateCrashPoint(){let r=Math.random(); return r<0.6 ? (Math.random()*1.5+1).toFixed(2) : r<0.9 ? (Math.random()*2+2.5).toFixed(2) : (Math.random()*3+4.5).toFixed(2);}
+function startCrash(){
+  if(isPlaying) return;
+  bet=parseFloat(document.getElementById("betAmount").value);
+  if(isNaN(bet)||bet<=0){alert("  "); return;}
+  db.ref("gamesstake/"+currentUser+"/balance").once("value").then(s=>{
+    let bal=s.val()||0; if(bal<bet){alert("  "); return;}
+    db.ref("gamesstake/"+currentUser+"/balance").set(bal-bet); updateBalance();
+    isPlaying=true; document.getElementById("gameStatus").innerText=" ..."; document.getElementById("cashoutBtn").disabled=false;
+    crashPoint = generateCrashPoint();
+    crashInterval = setInterval(()=>{
+      multiplier += 0.02;
+      document.getElementById("multiplier").innerText = multiplier.toFixed(2)+"x";
+      document.getElementById("plane").style.top = 20 - multiplier*25 + "px";
+      if(multiplier >= crashPoint){ crashLose(); }
+    },100);
+  });
+}
+function cashout(){
+  if(!isPlaying) return; clearInterval(crashInterval);
+  let win = bet*multiplier; isPlaying=false; document.getElementById("cashoutBtn").disabled=true;
+  document.getElementById("gameStatus").innerText=" "+win.toFixed(2)+"$";
+  db.ref("gamesstake/"+currentUser+"/balance").once("value").then(s=>{
+    let bal = s.val()||0; db.ref("gamesstake/"+currentUser+"/balance").set(bal+win);
+    addHistory("win",win.toFixed(2),multiplier.toFixed(2)); updateBalance(); resetCrash();
+  });
+}
+function crashLose(){clearInterval(crashInterval); isPlaying=false; document.getElementById("cashoutBtn").disabled=true;
+document.getElementById("gameStatus").innerText=" Crash  "+crashPoint+"x —  "+bet.toFixed(2)+"$";
+db.ref("gamesstake/"+currentUser+"/history").push({type:"lose",amount:bet.toFixed(2),multiplier:crashPoint,date:new Date().toLocaleString()});
+updateBalance(); resetCrash();}
+
+// Max Bet
+function maxBet(){db.ref("gamesstake/"+currentUser+"/balance").once("value").then(s=>{let bal=s.val()||0; document.getElementById("betAmount").value = bal.toFixed(2);});}
+
+// Store
+function rechargeCustom(){
+  let amount=parseFloat(document.getElementById('rechargeAmount').value); if(isNaN(amount)||amount<=0){alert('  '); return;}
+  db.ref('userStake/'+currentUser+'/balance').once('value').then(s=>{
+    let ub = s.val()||0; if(ub<amount){alert(' userStake  '); return;}
+    db.ref('userStake/'+currentUser+'/balance').set(ub-amount);
+    db.ref('gamesstake/'+currentUser+'/balance').once('value').then(g=>{
+      let gb=g.val()||0; db.ref('gamesstake/'+currentUser+'/balance').set(gb+amount);
+      updateBalance(); addHistory('recharge',amount,'+');
+      document.getElementById('msgRecharge').innerText=`  ${amount}$ `;
+    });
+  });
+}
+function withdrawCustom(){
+  let amount=parseFloat(document.getElementById('withdrawAmount').value); if(isNaN(amount)||amount<=0){alert('  '); return;}
+  db.ref('gamesstake/'+currentUser+'/balance').once('value').then(s=>{
+    let gb = s.val()||0; if(gb<amount){alert('   '); return;}
+    db.ref('gamesstake/'+currentUser+'/balance').set(gb-amount);
+    db.ref('userStake/'+currentUser+'/balance').once('value').then(u=>{
+      let ub=u.val()||0; db.ref('userStake/'+currentUser+'/balance').set(ub+amount);
+      updateBalance(); addHistory('withdraw',amount,'-');
+      document.getElementById('msgWithdraw').innerText=`  ${amount}$ `;
+    });
+  });
+}
+
+// History
+function addHistory(type,amount,result){
+  let date=new Date().toLocaleString();
+  db.ref('gamesstake/'+currentUser+'/history').push({type,amount,result,date});
+  db.ref('gamesstake/'+currentUser+'/history').once('value').then(s=>{
+    let h=s.val()||{}; let html=''; Object.values(h).forEach(i=>{html+=`<p>${i.date} | ${i.type} | ${i.amount}$ | ${i.result}</p>`;});
+    document.getElementById('history').innerHTML=html;
+  });
+}
+</script>
+
+</body>
+</html>
